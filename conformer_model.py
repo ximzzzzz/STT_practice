@@ -7,6 +7,7 @@ import pandas as pd
 import json
 import os
 import librosa
+import torch.nn.functional as F
 
 supported_rnns = {
     'lstm': nn.LSTM,
@@ -27,7 +28,8 @@ class SequenceWise(nn.Module):
     def forward(self, x):
 #         print(f'x shape : {x.shape}')
         t, n = x.size(0), x.size(1)
-        x = x.contiguous().view(t * n, -1)
+#         x = x.contiguous().view(t * n, -1)
+        x = x.reshape((t * n, -1))
         x = self.module(x)
         x = x.view(t, n, -1)
         return x
@@ -105,6 +107,7 @@ class Conv2dSubsampling(torch.nn.Module):
         x = self.conv(x)
         b, c, t, f = x.size()
         x = self.out(x.transpose(1, 2).contiguous().view(b, t, c * f))
+#         x = self.out(x.transpose(1,2).reshape((b, t, c*f)))
         if x_mask is None:
             return x, None
         return x, x_mask[:, :, :-2:2][:, :, :-2:2]
@@ -174,9 +177,12 @@ class Conformer(torch.nn.Module):
 #         self.dec_body = torch.nn.LSTM(args.dim, args.dec_dim, num_layers=1 )
         self.dec_body = BatchRNN(input_size = args.dim, 
                                  hidden_size = args.dec_dim,
-                                 bidirectional=False
+#                                  hidden_size = args.n_classes,
+                                 bidirectional=False,
+                                 batch_norm=False
                                 )
         self.fc = torch.nn.Linear(args.dec_dim, args.n_classes)
+#         self.fc = torch.nn.Linear(args.dim, args.n_classes)
 #         self.model = torch.nn.ModuleList(self.enc_pre + self.enc_body + self.dec_body + self.fc)
     
     def forward(self, x, input_percentages) :
@@ -187,7 +193,8 @@ class Conformer(torch.nn.Module):
         input_sizes = input_percentages.mul_(x.size(0)).int()
         x = self.dec_body(x,input_sizes)
         x = self.fc(x)
-#         x = self.model(x)
         x = x.transpose(0,1)
-        
+#         x = torch.softmax(x, dim=-1)
+        x = F.log_softmax(x, dim=-1)
+    
         return x, input_sizes
